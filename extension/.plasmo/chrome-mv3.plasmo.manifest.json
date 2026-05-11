@@ -22,13 +22,13 @@
   "description": "Get AI-powered buy/wait/watch recommendations on Amazon product pages.",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "tabs"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://www.amazon.com/dp/*",
-        "https://www.amazon.com/gp/product/*"
+        "https://www.amazon.com/*"
       ],
       "js": [
         "../src/contents/amazon.ts"
@@ -37,6 +37,7 @@
     }
   ],
   "host_permissions": [
-    "https://www.amazon.com/*"
+    "https://www.amazon.com/*",
+    "http://localhost:8000/*"
   ]
 }

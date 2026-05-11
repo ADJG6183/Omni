@@ -1,8 +1,11 @@
 import type { PlasmoCSConfig } from "plasmo"
 import { analyzeProduct } from "../utils/apiClient"
 
+// Match all Amazon pages — we decide inside the script whether it's a product page.
+// The previous narrow pattern (/dp/*) missed URLs with title slugs like:
+// https://www.amazon.com/Sony-WH-1000XM5/dp/B09XS7JWHH
 export const config: PlasmoCSConfig = {
-  matches: ["https://www.amazon.com/dp/*", "https://www.amazon.com/gp/product/*"],
+  matches: ["https://www.amazon.com/*"],
   run_at: "document_idle",
 }
 
@@ -31,7 +34,6 @@ interface PriceResult {
 }
 
 function extractPrice(): PriceResult {
-  // Helper: parse a whole + fraction pair from a parent element
   function parseWholeAndFraction(container: Element): number | null {
     const whole = container.querySelector(".a-price-whole")?.textContent?.replace(/[^0-9]/g, "")
     if (!whole) return null
@@ -40,26 +42,22 @@ function extractPrice(): PriceResult {
     return isNaN(parsed) || parsed <= 0 ? null : parsed
   }
 
-  // Priority 1: standard desktop buy box — the most reliable source
-  const buyBoxContainers = [
-    document.getElementById("corePriceDisplay_desktop_feature_div"),
-    document.getElementById("apex_desktop"),
-  ]
-  for (const container of buyBoxContainers) {
+  // Priority 1: standard desktop buy box
+  for (const id of ["corePriceDisplay_desktop_feature_div", "apex_desktop"]) {
+    const container = document.getElementById(id)
     if (!container) continue
     const price = parseWholeAndFraction(container)
     if (price) return { value: price }
   }
 
-  // Priority 2: simple inline buy box price (e.g. "$249.99" in a single span)
+  // Priority 2: simple inline buy box price
   const inlineEl = document.getElementById("price_inside_buybox")
   if (inlineEl) {
-    const text = inlineEl.textContent?.replace(/[^0-9.]/g, "") ?? ""
-    const parsed = parseFloat(text)
+    const parsed = parseFloat(inlineEl.textContent?.replace(/[^0-9.]/g, "") ?? "")
     if (!isNaN(parsed) && parsed > 0) return { value: parsed }
   }
 
-  // Priority 3: fallback — first .a-price on the page (may not be the buy price)
+  // Priority 3: fallback — first .a-price on the page
   const fallbackContainer = document.querySelector(".a-price")
   if (fallbackContainer) {
     const price = parseWholeAndFraction(fallbackContainer)
@@ -97,14 +95,17 @@ function extractImageUrl(): string | null {
 // Main runner
 // ---------------------------------------------------------------------------
 
+let isRunning = false
+
 async function run(url: string) {
+  if (isRunning) return
+  isRunning = true
+
   const asin = extractAsin(url)
 
-  // Clear any previous result immediately — prevents the popup from showing
-  // a stale result from the last page while this analysis is in progress.
+  // Clear stale result immediately — popup won't show the previous product's data
   chrome.storage.local.set({ omni_result: { loading: true, asin } })
 
-  // --- Field extraction with per-field diagnostics ---
   const titleResult = extractTitle()
   const priceResult = extractPrice()
   const extractionWarnings: string[] = []
@@ -112,7 +113,6 @@ async function run(url: string) {
   if (titleResult.warning) extractionWarnings.push(titleResult.warning)
   if (priceResult.warning) extractionWarnings.push(priceResult.warning)
 
-  // Hard stop: can't build a meaningful result without these three
   if (!asin) {
     chrome.storage.local.set({
       omni_result: {
@@ -122,6 +122,7 @@ async function run(url: string) {
         asin: null,
       },
     })
+    isRunning = false
     return
   }
 
@@ -134,6 +135,7 @@ async function run(url: string) {
         asin,
       },
     })
+    isRunning = false
     return
   }
 
@@ -146,10 +148,10 @@ async function run(url: string) {
         asin,
       },
     })
+    isRunning = false
     return
   }
 
-  // --- API call ---
   try {
     const result = await analyzeProduct({
       retailer: "amazon",
@@ -164,12 +166,7 @@ async function run(url: string) {
     })
 
     chrome.storage.local.set({
-      omni_result: {
-        loading: false,
-        asin,
-        extractionWarnings,
-        data: result,
-      },
+      omni_result: { loading: false, asin, extractionWarnings, data: result },
     })
   } catch (err: any) {
     chrome.storage.local.set({
@@ -182,24 +179,40 @@ async function run(url: string) {
       },
     })
   }
+
+  isRunning = false
 }
 
 // ---------------------------------------------------------------------------
-// Entry point — also re-run on SPA navigation (Amazon uses pushState)
+// URL polling — checks every second for navigation to a new product page.
+// More reliable than MutationObserver for Amazon's SPA navigation.
 // ---------------------------------------------------------------------------
 
 let lastUrl = window.location.href
-run(lastUrl)
+let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
-// Detect client-side URL changes (Amazon SPA navigation between products)
-const observer = new MutationObserver(() => {
+// Run immediately on first load if this is a product page
+if (extractAsin(lastUrl)) {
+  run(lastUrl)
+} else {
+  // Not a product page — clear any leftover result from a previous tab
+  chrome.storage.local.set({ omni_result: null })
+}
+
+setInterval(() => {
   const currentUrl = window.location.href
-  if (currentUrl !== lastUrl) {
-    lastUrl = currentUrl
+  if (currentUrl === lastUrl) return
+
+  lastUrl = currentUrl
+
+  // Debounce: wait 800ms after the URL stops changing before running.
+  // Amazon sometimes fires multiple pushState calls in quick succession.
+  if (debounceTimer) clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => {
     if (extractAsin(currentUrl)) {
       run(currentUrl)
+    } else {
+      chrome.storage.local.set({ omni_result: null })
     }
-  }
-})
-
-observer.observe(document.body, { childList: true, subtree: true })
+  }, 800)
+}, 1000)
