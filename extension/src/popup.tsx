@@ -1,34 +1,50 @@
 import { useEffect, useState } from "react"
+import "./popup.css"
 import { RecommendationCard } from "./components/RecommendationCard"
 import type { AnalysisResponse } from "./utils/apiClient"
 
 type StoredResult =
-  | { loading: true }
-  | { loading: false; data: AnalysisResponse }
-  | { error: true; message: string }
+  | { loading: true; asin: string | null }
+  | { loading: false; asin: string; data: AnalysisResponse; extractionWarnings: string[] }
+  | { error: true; code: string; message: string; asin: string | null }
   | null
+
+function extractAsinFromUrl(url: string): string | null {
+  const match = url.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/)
+  return match ? match[1] : null
+}
 
 export default function Popup() {
   const [result, setResult] = useState<StoredResult>(null)
+  const [tabAsin, setTabAsin] = useState<string | null>(null)
 
   useEffect(() => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      setTabAsin(extractAsinFromUrl(tabs[0]?.url ?? ""))
+    })
+
     chrome.storage.local.get("omni_result", (items) => {
       setResult(items.omni_result ?? null)
     })
 
-    // Listen for updates while popup is open
     const listener = (changes: Record<string, chrome.storage.StorageChange>) => {
-      if (changes.omni_result) {
-        setResult(changes.omni_result.newValue)
-      }
+      if (changes.omni_result) setResult(changes.omni_result.newValue)
     }
     chrome.storage.onChanged.addListener(listener)
     return () => chrome.storage.onChanged.removeListener(listener)
   }, [])
 
+  const storedAsin = result && "asin" in result ? result.asin : null
+  const isStale = tabAsin && storedAsin && tabAsin !== storedAsin
+
   return (
-    <div style={{ minWidth: 320, padding: 8 }}>
+    <div className="popup-root">
       <Header />
+      {isStale && (
+        <div className="popup-stale-banner">
+          ⚠ Omni is analyzing this page. Results from the previous product are shown below.
+        </div>
+      )}
       <Body result={result} />
     </div>
   )
@@ -36,17 +52,9 @@ export default function Popup() {
 
 function Header() {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        paddingBottom: 10,
-        borderBottom: "1px solid #e5e7eb",
-        marginBottom: 10,
-      }}>
-      <span style={{ fontWeight: 800, fontSize: 16, color: "#111827" }}>Omni</span>
-      <span style={{ fontSize: 11, color: "#6b7280" }}>AI Price Intelligence</span>
+    <div className="popup-header">
+      <span className="popup-header-title">Omni</span>
+      <span className="popup-header-sub">AI Price Intelligence</span>
     </div>
   )
 }
@@ -55,57 +63,44 @@ function Body({ result }: { result: StoredResult }) {
   if (!result) {
     return <Placeholder message="Visit an Amazon product page to get a recommendation." />
   }
-
   if ("loading" in result && result.loading) {
     return <Placeholder message="Analyzing price history…" spinner />
   }
-
   if ("error" in result && result.error) {
+    const r = result as { error: true; code: string; message: string }
+    return <ErrorState code={r.code} message={r.message} />
+  }
+  if ("data" in result) {
     return (
-      <Placeholder
-        message={(result as any).message ?? "Something went wrong. Try refreshing the page."}
-        isError
+      <RecommendationCard
+        data={result.data}
+        extractionWarnings={result.extractionWarnings ?? []}
       />
     )
   }
-
-  if ("data" in result) {
-    return <RecommendationCard data={result.data} />
-  }
-
   return <Placeholder message="No product detected on this page." />
 }
 
-function Placeholder({
-  message,
-  spinner = false,
-  isError = false,
-}: {
-  message: string
-  spinner?: boolean
-  isError?: boolean
-}) {
+const ERROR_LABELS: Record<string, string> = {
+  ASIN_NOT_FOUND: "Product not identified",
+  TITLE_NOT_FOUND: "Title unavailable",
+  PRICE_NOT_FOUND: "Price unavailable",
+  API_ERROR: "Backend unreachable",
+}
+
+function ErrorState({ code, message }: { code: string; message: string }) {
   return (
-    <div
-      style={{
-        padding: "20px 16px",
-        textAlign: "center",
-        color: isError ? "#dc2626" : "#6b7280",
-        fontSize: 13,
-      }}>
-      {spinner && (
-        <div
-          style={{
-            width: 20,
-            height: 20,
-            border: "2px solid #e5e7eb",
-            borderTop: "2px solid #2563eb",
-            borderRadius: "50%",
-            margin: "0 auto 10px",
-            animation: "spin 0.8s linear infinite",
-          }}
-        />
-      )}
+    <div className="popup-error">
+      <div className="popup-error-badge">{ERROR_LABELS[code] ?? "Error"}</div>
+      <div className="popup-error-message">{message}</div>
+    </div>
+  )
+}
+
+function Placeholder({ message, spinner = false }: { message: string; spinner?: boolean }) {
+  return (
+    <div className="popup-placeholder">
+      {spinner && <div className="popup-spinner" />}
       {message}
     </div>
   )

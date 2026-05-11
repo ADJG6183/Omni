@@ -1,5 +1,10 @@
 {
   "extends": "plasmo/templates/tsconfig.base",
   "exclude": ["node_modules"],
-  "include": [".plasmo/index.d.ts", "src/**/*.ts", "src/**/*.tsx"]
+  "include": [".plasmo/index.d.ts", "src/**/*.ts", "src/**/*.tsx", "src/declarations.d.ts"],
+  "compilerOptions": {
+    "types": ["chrome"],
+    "moduleResolution": "bundler",
+    "ignoreDeprecations": "5.0"
+  }
 }

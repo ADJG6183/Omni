@@ -24,6 +24,7 @@ export interface AnalysisResponse {
   lowest_price_seen: number | null
   highest_price_seen: number | null
   explanation: string[]
+  warnings: string[]
   price_history_available: boolean
   model_version: string
   latency_ms: number | null

@@ -162,3 +162,44 @@ class TestAnalyzeEndpoint:
         }
         resp = client.post("/api/v1/products/analyze", json=payload)
         assert resp.status_code == 200
+
+    def test_response_includes_warnings_field(self, client):
+        resp = client.post("/api/v1/products/analyze", json=VALID_AMAZON_PAYLOAD)
+        body = resp.json()
+        assert "warnings" in body
+        assert isinstance(body["warnings"], list)
+
+    def test_invalid_product_url_scheme_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/products/analyze",
+            json={**VALID_AMAZON_PAYLOAD, "product_url": "javascript:alert(1)"},
+        )
+        assert resp.status_code == 422
+
+    def test_plain_string_product_url_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/products/analyze",
+            json={**VALID_AMAZON_PAYLOAD, "product_url": "not-a-url"},
+        )
+        assert resp.status_code == 422
+
+    def test_future_timestamp_returns_422(self, client):
+        from datetime import datetime, timezone, timedelta
+        future = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+        resp = client.post(
+            "/api/v1/products/analyze",
+            json={**VALID_AMAZON_PAYLOAD, "timestamp": future},
+        )
+        assert resp.status_code == 422
+
+    def test_no_asin_in_url_triggers_warning(self, client):
+        # A valid URL but with no extractable ASIN — should succeed but include a warning
+        payload = {
+            **VALID_AMAZON_PAYLOAD,
+            "product_url": "https://www.amazon.com/s?k=headphones",
+            "retailer_product_id": None,
+        }
+        resp = client.post("/api/v1/products/analyze", json=payload)
+        assert resp.status_code == 200
+        warnings = resp.json()["warnings"]
+        assert any("No product ID" in w for w in warnings)

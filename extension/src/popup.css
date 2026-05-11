@@ -1,0 +1,77 @@
+.popup-root {
+  min-width: 320px;
+  padding: 8px;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+}
+
+/* Header */
+.popup-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 10px;
+}
+.popup-header-title {
+  font-weight: 800;
+  font-size: 16px;
+  color: #111827;
+}
+.popup-header-sub {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+/* Stale-data warning banner */
+.popup-stale-banner {
+  background: #fefce8;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #92400e;
+  margin-bottom: 10px;
+}
+
+/* Placeholder / loading */
+.popup-placeholder {
+  padding: 20px 16px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 13px;
+}
+.popup-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e5e7eb;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  margin: 0 auto 10px;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error state */
+.popup-error {
+  padding: 16px;
+  text-align: center;
+}
+.popup-error-badge {
+  display: inline-block;
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.popup-error-message {
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.5;
+}

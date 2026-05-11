@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
-from pydantic import BaseModel, field_validator, model_validator, HttpUrl
-import re
+from urllib.parse import urlparse
+from pydantic import BaseModel, field_validator, model_validator
 
 SUPPORTED_RETAILERS = {"amazon", "bestbuy"}
 SUPPORTED_CURRENCIES = {"USD"}
@@ -29,6 +29,17 @@ class ProductObservation(BaseModel):
         if normalized not in SUPPORTED_RETAILERS:
             raise ValueError(f"Unsupported retailer '{v}'. Supported: {SUPPORTED_RETAILERS}")
         return normalized
+
+    @field_validator("product_url")
+    @classmethod
+    def validate_product_url(cls, v: str) -> str:
+        v = v.strip()
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("product_url must be an http or https URL")
+        if not parsed.netloc:
+            raise ValueError("product_url must include a valid domain")
+        return v
 
     @field_validator("price")
     @classmethod
@@ -73,8 +84,16 @@ class ProductObservation(BaseModel):
 
     @model_validator(mode="after")
     def validate_timestamp_not_future(self) -> "ProductObservation":
-        if self.timestamp and self.timestamp > datetime.now(tz=self.timestamp.tzinfo):
-            raise ValueError("Timestamp cannot be in the future")
+        if self.timestamp:
+            # Normalize both to UTC — handles naive timestamps by assuming UTC
+            now_utc = datetime.now(timezone.utc)
+            if self.timestamp.tzinfo is None:
+                ts_utc = self.timestamp.replace(tzinfo=timezone.utc)
+            else:
+                ts_utc = self.timestamp.astimezone(timezone.utc)
+            # 60-second grace period for client/server clock skew
+            if ts_utc > now_utc + timedelta(seconds=60):
+                raise ValueError("Timestamp cannot be in the future")
         return self
 
 
@@ -97,6 +116,7 @@ class ProductAnalysisResponse(BaseModel):
     lowest_price_seen: Optional[float]
     highest_price_seen: Optional[float]
     explanation: list[str]
+    warnings: list[str]
     price_history_available: bool
     model_version: str
     latency_ms: Optional[int]
