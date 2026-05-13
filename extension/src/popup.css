@@ -9,19 +9,32 @@
 .popup-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding-bottom: 10px;
   border-bottom: 1px solid #e5e7eb;
   margin-bottom: 10px;
+}
+.popup-header-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.popup-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 .popup-header-title {
   font-weight: 800;
   font-size: 16px;
   color: #111827;
+  line-height: 1;
 }
 .popup-header-sub {
   font-size: 11px;
   color: #6b7280;
+  line-height: 1;
 }
 
 /* Stale-data warning banner */

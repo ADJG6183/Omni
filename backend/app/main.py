@@ -12,7 +12,10 @@ from app.api.v1 import routes_health, routes_products
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
+    from app.core.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
     yield
+    stop_scheduler()
 
 
 app = FastAPI(

@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     api_env: str = "development"
-    allowed_origins: str = "chrome-extension://,http://localhost:3000,https://www.amazon.com"
+    allowed_origins: str = "chrome-extension://,http://localhost:3000,https://www.amazon.com,https://www.bestbuy.com"
 
     @property
     def origins_list(self) -> list[str]:

@@ -29,6 +29,7 @@
     ],
     "host_permissions": [
       "https://www.amazon.com/*",
+      "https://www.bestbuy.com/*",
       "http://localhost:8000/*"
     ]
   }

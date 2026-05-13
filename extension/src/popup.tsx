@@ -3,6 +3,8 @@ import "./popup.css"
 import { RecommendationCard } from "./components/RecommendationCard"
 import type { AnalysisResponse } from "./utils/apiClient"
 
+import logoUrl from "url:../assets/icon48.png"
+
 type StoredResult =
   | { loading: true; asin: string | null }
   | { loading: false; asin: string; data: AnalysisResponse; extractionWarnings: string[] }
@@ -53,8 +55,11 @@ export default function Popup() {
 function Header() {
   return (
     <div className="popup-header">
-      <span className="popup-header-title">Omni</span>
-      <span className="popup-header-sub">AI Price Intelligence</span>
+      <img src={logoUrl} className="popup-header-logo" alt="Omni logo" />
+      <div className="popup-header-text">
+        <span className="popup-header-title">Omni</span>
+        <span className="popup-header-sub">AI Price Intelligence</span>
+      </div>
     </div>
   )
 }

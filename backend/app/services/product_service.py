@@ -23,8 +23,13 @@ def extract_retailer_product_id(retailer: str, url: str) -> str | None:
         return match.group(1) if match else None
 
     if retailer == "bestbuy":
-        match = re.search(r"skuId=(\d+)", url)
-        return match.group(1) if match else None
+        # Primary: numeric segment before .p in the path (/6505727.p)
+        path_match = re.search(r"/(\d{6,8})\.p(?:[?#]|$)", url)
+        if path_match:
+            return path_match[1]
+        # Fallback: skuId query param
+        query_match = re.search(r"[?&]skuId=(\d+)", url)
+        return query_match.group(1) if query_match else None
 
     return None
 
