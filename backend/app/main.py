@@ -13,6 +13,14 @@ from app.api.v1 import routes_health, routes_products
 async def lifespan(app: FastAPI):
     configure_logging()
     from app.core.scheduler import start_scheduler, stop_scheduler
+    from app.ml_runtime.model_loader import load_model, register_model_in_db
+    from app.db.session import SessionLocal
+    load_model(model_type="random_forest")
+    db = SessionLocal()
+    try:
+        register_model_in_db(db)
+    finally:
+        db.close()
     start_scheduler()
     yield
     stop_scheduler()
