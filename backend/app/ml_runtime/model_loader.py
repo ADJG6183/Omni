@@ -40,15 +40,16 @@ _VERSION = "v1"
 class LoadedModel:
     model: Any              # sklearn estimator (Pipeline or direct classifier)
     feature_columns: list[str]
-    model_version: str      # e.g. "price_drop_random_forest_v1"
-    model_type: str         # "random_forest" | "logistic_regression"
+    model_version: str      # e.g. "price_drop_xgboost_v1"
+    model_type: str         # "xgboost" | "random_forest" | "logistic_regression"
     artifact_path: str
+    base_model: Any | None = None  # raw XGBoost tree (for SHAP); None for non-XGBoost
 
 
 _loaded: LoadedModel | None = None
 
 
-def load_model(model_type: str = "random_forest") -> None:
+def load_model(model_type: str = "xgboost") -> None:
     """
     Load model artifact from ml/artifacts/ into module-level state.
     Called once during FastAPI lifespan startup.
@@ -80,12 +81,25 @@ def load_model(model_type: str = "random_forest") -> None:
         with open(columns_path) as f:
             feature_columns = json.load(f)
 
+        # XGBoost saves a separate base model (un-calibrated) for SHAP explanations.
+        # The calibrated model gives better probabilities; the base model exposes the
+        # tree structure that SHAP needs. Other model types don't have a base model.
+        base_model = None
+        if model_type == "xgboost":
+            base_path = _ARTIFACTS_DIR / f"price_drop_xgboost_base_{_VERSION}.pkl"
+            if base_path.exists():
+                base_model = joblib.load(base_path)
+                logger.info("Loaded XGBoost base model for SHAP: %s", base_path.name)
+            else:
+                logger.warning("XGBoost base model not found at %s — SHAP explanations disabled.", base_path)
+
         _loaded = LoadedModel(
             model=model,
             feature_columns=feature_columns,
             model_version=f"price_drop_{model_type}_{_VERSION}",
             model_type=model_type,
             artifact_path=str(artifact_path),
+            base_model=base_model,
         )
         logger.info(
             "ML model loaded: %s | %d features | artifact: %s",

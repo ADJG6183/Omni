@@ -21,9 +21,11 @@ If the model is not loaded (artifact missing or startup failed), returns
 recommendations. The API never errors out because ML is unavailable.
 """
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
+import shap
 from sqlalchemy.orm import Session
 
 from app.db.models import PriceHistory
@@ -101,26 +103,69 @@ def _compute_features(history_rows: list[PriceHistory]) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# SHAP feature attribution
+# ---------------------------------------------------------------------------
+
+def _compute_shap_top_features(
+    X: pd.DataFrame,
+    base_model: Any,
+    top_n: int = 3,
+) -> list[dict]:
+    """
+    Compute SHAP values for one row and return the top N features by absolute contribution.
+
+    SHAP (SHapley Additive exPlanations) answers: "how much did each feature push
+    this prediction up or down?" A positive SHAP value means the feature pushed the
+    model toward predicting a price drop. A negative value means it pushed away.
+
+    We use TreeExplainer because it is fast and exact for tree models (XGBoost,
+    Random Forest). It does not require sampling or approximation.
+
+    Returns a list like:
+        [{"name": "price_vs_avg_30d_pct", "value": 0.18, "shap": 0.12}, ...]
+    sorted from most to least influential.
+    """
+    try:
+        explainer = shap.TreeExplainer(base_model, feature_perturbation="tree_path_dependent")
+        shap_vals = explainer.shap_values(X)
+        # shap_vals shape: (1, n_features) — squeeze to 1-D
+        row_shap = shap_vals[0] if shap_vals.ndim > 1 else shap_vals
+        feature_names = X.columns.tolist()
+        contributions = [
+            {"name": feature_names[i], "value": float(X.iloc[0, i]), "shap": float(row_shap[i])}
+            for i in range(len(feature_names))
+        ]
+        contributions.sort(key=lambda x: abs(x["shap"]), reverse=True)
+        return contributions[:top_n]
+    except Exception:
+        logger.exception("SHAP computation failed — explanations will be generic")
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Public interface
 # ---------------------------------------------------------------------------
 
 def predict_drop_probability(
     db: Session,
     product_id: str,
-) -> tuple[float | None, str]:
+) -> tuple[float | None, str, list[dict]]:
     """
-    Returns (drop_probability_7d, model_version).
+    Returns (drop_probability_7d, model_version, top_features).
 
     drop_probability_7d is None when:
-    - the model is not loaded (returns "rules_v1")
+    - the model is not loaded (artifact missing or startup failed)
     - the product has fewer than 2 observations (too little history)
     - feature computation fails unexpectedly
 
-    The caller should fall back to rule-based recommendations when None is returned.
+    top_features is a list of SHAP feature attribution dicts (empty when SHAP
+    is unavailable or the model type doesn't support it).
+
+    The caller should fall back to rule-based recommendations when prob is None.
     """
     loaded = get_model()
     if not loaded:
-        return None, "rules_v1"
+        return None, "rules_v1", []
 
     history = (
         db.query(PriceHistory)
@@ -131,13 +176,13 @@ def predict_drop_probability(
 
     if len(history) < 2:
         logger.debug("Insufficient history for ML inference on product %s (%d obs)", product_id, len(history))
-        return None, loaded.model_version
+        return None, loaded.model_version, []
 
     try:
         feature_df = _compute_features(history)
     except Exception:
         logger.exception("Feature computation failed for product %s", product_id)
-        return None, loaded.model_version
+        return None, loaded.model_version, []
 
     last_row = feature_df.iloc[[-1]]
 
@@ -152,7 +197,16 @@ def predict_drop_probability(
         prob = float(loaded.model.predict_proba(X)[0][1])
     except Exception:
         logger.exception("Model inference failed for product %s", product_id)
-        return None, loaded.model_version
+        return None, loaded.model_version, []
 
-    logger.debug("Prediction for product %s: %.3f (model=%s)", product_id, prob, loaded.model_version)
-    return prob, loaded.model_version
+    # Compute SHAP explanations if the base tree model is available (XGBoost only).
+    # Falls back to empty list silently — caller uses generic explanation text.
+    top_features: list[dict] = []
+    if loaded.base_model is not None:
+        top_features = _compute_shap_top_features(X, loaded.base_model)
+
+    logger.debug(
+        "Prediction for product %s: %.3f (model=%s, shap_features=%d)",
+        product_id, prob, loaded.model_version, len(top_features),
+    )
+    return prob, loaded.model_version, top_features

@@ -77,11 +77,16 @@ def analyze_product(observation: ProductObservation, db: Session = Depends(get_d
             f"30-day average (${summary.average_price_30d:.2f}). Verify this is the correct price."
         )
 
-    # 5. ML inference (returns None if model not loaded or insufficient history)
-    drop_probability, model_version = predictor.predict_drop_probability(db, product.id)
+    # 5. ML inference (returns None prob if model not loaded or insufficient history)
+    drop_probability, model_version, top_features = predictor.predict_drop_probability(db, product.id)
 
     # 6. Recommendation (uses ML probability when available, rules as fallback)
-    result = recommendation_service.generate_recommendation(summary, drop_probability_7d=drop_probability)
+    #    top_features carries SHAP attribution data for feature-driven explanation text
+    result = recommendation_service.generate_recommendation(
+        summary,
+        drop_probability_7d=drop_probability,
+        top_features=top_features,
+    )
 
     # 7. Store prediction (skipped when drop_probability is None)
     prediction_service.store_prediction(
