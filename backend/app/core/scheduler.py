@@ -26,6 +26,7 @@ Safety notes
   the server recovers from downtime.
 """
 import logging
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.executors.pool import ThreadPoolExecutor
@@ -44,83 +45,84 @@ _scheduler: BackgroundScheduler | None = None
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+@contextmanager
+def _db_session():
+    """Open a DB session for a scheduler job, always closing on exit."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
 
 def _stale_product_check() -> None:
     """Log products that have not received a new observation recently."""
-    db = SessionLocal()
     try:
         from sqlalchemy import func
-
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=STALE_THRESHOLD_HOURS)
-
-        stale_rows = (
-            db.query(
-                Product.id,
-                Product.title,
-                func.max(PriceHistory.observed_at).label("last_seen"),
-            )
-            .join(PriceHistory, PriceHistory.product_id == Product.id)
-            .group_by(Product.id, Product.title)
-            .having(func.max(PriceHistory.observed_at) < cutoff)
-            .all()
-        )
-
-        if stale_rows:
-            logger.info(
-                "Stale product check: %d product(s) not seen in >%dh",
-                len(stale_rows),
-                STALE_THRESHOLD_HOURS,
-            )
-            for row in stale_rows:
-                hours_ago = (
-                    datetime.now(timezone.utc) - row.last_seen
-                ).total_seconds() / 3600
-                logger.debug(
-                    "  Stale: %.50s (last seen %.1fh ago)", row.title, hours_ago
+        with _db_session() as db:
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=STALE_THRESHOLD_HOURS)
+            stale_rows = (
+                db.query(
+                    Product.id,
+                    Product.title,
+                    func.max(PriceHistory.observed_at).label("last_seen"),
                 )
-        else:
-            logger.info(
-                "Stale product check: all products have recent observations."
+                .join(PriceHistory, PriceHistory.product_id == Product.id)
+                .group_by(Product.id, Product.title)
+                .having(func.max(PriceHistory.observed_at) < cutoff)
+                .all()
             )
+            if stale_rows:
+                logger.info(
+                    "Stale product check: %d product(s) not seen in >%dh",
+                    len(stale_rows),
+                    STALE_THRESHOLD_HOURS,
+                )
+                for row in stale_rows:
+                    hours_ago = (
+                        datetime.now(timezone.utc) - row.last_seen
+                    ).total_seconds() / 3600
+                    logger.debug(
+                        "  Stale: %.50s (last seen %.1fh ago)", row.title, hours_ago
+                    )
+            else:
+                logger.info("Stale product check: all products have recent observations.")
     except Exception:
         logger.exception("Stale product check job failed")
-    finally:
-        db.close()
 
 
 def _db_health_report() -> None:
     """Log a daily snapshot of DB stats to track data collection progress."""
-    db = SessionLocal()
     try:
         from sqlalchemy import func
-
-        product_count = db.query(func.count(Product.id)).scalar() or 0
-        price_count = db.query(func.count(PriceHistory.id)).scalar() or 0
-        oldest = db.query(func.min(PriceHistory.observed_at)).scalar()
-        newest = db.query(func.max(PriceHistory.observed_at)).scalar()
-
-        # Break down by source (seed vs extension)
-        source_counts = (
-            db.query(PriceHistory.source, func.count(PriceHistory.id))
-            .group_by(PriceHistory.source)
-            .all()
-        )
-        source_summary = ", ".join(f"{s}={c}" for s, c in source_counts)
-
-        logger.info(
-            "DB health: %d products | %d price rows (%s) | range %s → %s",
-            product_count,
-            price_count,
-            source_summary or "no data",
-            oldest.date() if oldest else "n/a",
-            newest.date() if newest else "n/a",
-        )
+        with _db_session() as db:
+            product_count = db.query(func.count(Product.id)).scalar() or 0
+            price_count   = db.query(func.count(PriceHistory.id)).scalar() or 0
+            oldest = db.query(func.min(PriceHistory.observed_at)).scalar()
+            newest = db.query(func.max(PriceHistory.observed_at)).scalar()
+            source_counts = (
+                db.query(PriceHistory.source, func.count(PriceHistory.id))
+                .group_by(PriceHistory.source)
+                .all()
+            )
+            source_summary = ", ".join(f"{s}={c}" for s, c in source_counts)
+            logger.info(
+                "DB health: %d products | %d price rows (%s) | range %s → %s",
+                product_count,
+                price_count,
+                source_summary or "no data",
+                oldest.date() if oldest else "n/a",
+                newest.date() if newest else "n/a",
+            )
     except Exception:
         logger.exception("DB health report job failed")
-    finally:
-        db.close()
 
 
 # ---------------------------------------------------------------------------

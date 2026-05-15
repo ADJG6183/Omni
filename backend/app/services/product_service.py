@@ -47,6 +47,12 @@ def normalize_canonical_url(retailer: str, url: str) -> str:
             return urlunparse((parsed.scheme, parsed.netloc, match.group(1), "", "", ""))
 
     if retailer == "bestbuy":
+        # Anchor on the SKU, not the product slug — the slug changes across
+        # page variants and search navigations, making it an unstable key.
+        sku = extract_retailer_product_id("bestbuy", url)
+        if sku:
+            return f"https://www.bestbuy.com/site/{sku}.p?skuId={sku}"
+        # Fallback: strip everything except skuId
         qs = parse_qs(parsed.query)
         clean_query = f"skuId={qs['skuId'][0]}" if "skuId" in qs else ""
         return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", clean_query, ""))
