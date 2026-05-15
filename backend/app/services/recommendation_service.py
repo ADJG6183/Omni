@@ -110,6 +110,14 @@ def _feature_sentence(name: str, value: float, shap: float) -> Optional[str]:
         note = "— historically elevated, may pull back" if pushing_drop else "— at or below average, a fair price"
         return f"Price is {pct:.0f}% {direction} the 30-day average {note}."
 
+    if name == "price_vs_max_30d_pct":
+        # Negative value means price is below the 30-day high (expected); positive means at/above it.
+        pct = abs(value) * 100
+        if value >= -0.01:
+            return "Price is at or near its 30-day high — likely an elevated entry point." if pushing_drop else None
+        note = "— a discount from the recent peak" if not pushing_drop else "— but may fall further from here"
+        return f"Price is {pct:.0f}% below its 30-day high {note}."
+
     if name == "price_vs_min_30d_pct":
         pct = value * 100
         if pct < 1:
@@ -139,11 +147,15 @@ def _feature_sentence(name: str, value: float, shap: float) -> Optional[str]:
 
     if name == "days_since_last_drop":
         days = int(value)
+        if days == 0:
+            return "Price just dropped — may stabilize before dropping further." if not pushing_drop else None
         note = "— may be due for another soon" if pushing_drop and days > 7 else "— price may stabilize from here" if not pushing_drop else ""
         return f"Last price drop was {days} day{'s' if days != 1 else ''} ago {note}."
 
     if name == "price_change_prev_pct":
         pct = abs(value) * 100
+        if pct < 0.5:
+            return None  # sub-0.5% change is noise, not worth surfacing
         direction = "rose" if value > 0 else "fell"
         return f"Price {direction} {pct:.0f}% from the previous observation."
 

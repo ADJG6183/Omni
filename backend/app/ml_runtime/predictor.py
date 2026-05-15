@@ -25,7 +25,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import shap
 from sqlalchemy.orm import Session
 
 from app.db.models import PriceHistory
@@ -46,12 +45,15 @@ def _rolling_drop_count(prices: pd.Series, window: str) -> pd.Series:
 
 
 def _days_since_last_drop(g: pd.DataFrame) -> np.ndarray:
+    # O(n): track the most recent drop index rather than rescanning all prior rows.
     result = np.full(len(g), np.nan)
     drop_mask = g["price"].diff() < 0
-    for i in range(1, len(g)):
-        prior_drops = g.index[:i][drop_mask.iloc[:i]]
-        if len(prior_drops) > 0:
-            delta = g["observed_at"].iloc[i] - g["observed_at"].iloc[prior_drops[-1]]
+    last_drop_i: int | None = None
+    for i in range(len(g)):
+        if drop_mask.iloc[i] and i > 0:
+            last_drop_i = i
+        if last_drop_i is not None and i > last_drop_i:
+            delta = g["observed_at"].iloc[i] - g["observed_at"].iloc[last_drop_i]
             result[i] = delta.total_seconds() / 86400
     return result
 
@@ -108,25 +110,25 @@ def _compute_features(history_rows: list[PriceHistory]) -> pd.DataFrame:
 
 def _compute_shap_top_features(
     X: pd.DataFrame,
-    base_model: Any,
+    explainer: Any,
     top_n: int = 3,
 ) -> list[dict]:
     """
-    Compute SHAP values for one row and return the top N features by absolute contribution.
+    Compute SHAP values for one row using a pre-built TreeExplainer and return the
+    top N features by absolute contribution.
 
     SHAP (SHapley Additive exPlanations) answers: "how much did each feature push
     this prediction up or down?" A positive SHAP value means the feature pushed the
     model toward predicting a price drop. A negative value means it pushed away.
 
-    We use TreeExplainer because it is fast and exact for tree models (XGBoost,
-    Random Forest). It does not require sampling or approximation.
+    The explainer is built once at model load time (see model_loader.py) rather than
+    reconstructed here — the constructor does non-trivial tree pre-computation.
 
     Returns a list like:
         [{"name": "price_vs_avg_30d_pct", "value": 0.18, "shap": 0.12}, ...]
     sorted from most to least influential.
     """
     try:
-        explainer = shap.TreeExplainer(base_model, feature_perturbation="tree_path_dependent")
         shap_vals = explainer.shap_values(X)
         # shap_vals shape: (1, n_features) — squeeze to 1-D
         row_shap = shap_vals[0] if shap_vals.ndim > 1 else shap_vals
@@ -199,11 +201,11 @@ def predict_drop_probability(
         logger.exception("Model inference failed for product %s", product_id)
         return None, loaded.model_version, []
 
-    # Compute SHAP explanations if the base tree model is available (XGBoost only).
+    # Compute SHAP explanations using the cached explainer (built at startup).
     # Falls back to empty list silently — caller uses generic explanation text.
     top_features: list[dict] = []
-    if loaded.base_model is not None:
-        top_features = _compute_shap_top_features(X, loaded.base_model)
+    if loaded.shap_explainer is not None:
+        top_features = _compute_shap_top_features(X, loaded.shap_explainer)
 
     logger.debug(
         "Prediction for product %s: %.3f (model=%s, shap_features=%d)",

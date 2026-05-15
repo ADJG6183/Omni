@@ -43,7 +43,8 @@ class LoadedModel:
     model_version: str      # e.g. "price_drop_xgboost_v1"
     model_type: str         # "xgboost" | "random_forest" | "logistic_regression"
     artifact_path: str
-    base_model: Any | None = None  # raw XGBoost tree (for SHAP); None for non-XGBoost
+    base_model: Any | None = None   # raw XGBoost tree (for SHAP); None for non-XGBoost
+    shap_explainer: Any | None = None  # pre-built TreeExplainer; avoids rebuilding per request
 
 
 _loaded: LoadedModel | None = None
@@ -85,11 +86,22 @@ def load_model(model_type: str = "xgboost") -> None:
         # The calibrated model gives better probabilities; the base model exposes the
         # tree structure that SHAP needs. Other model types don't have a base model.
         base_model = None
+        shap_explainer = None
         if model_type == "xgboost":
             base_path = _ARTIFACTS_DIR / f"price_drop_xgboost_base_{_VERSION}.pkl"
             if base_path.exists():
                 base_model = joblib.load(base_path)
                 logger.info("Loaded XGBoost base model for SHAP: %s", base_path.name)
+                # Build TreeExplainer once at startup. The constructor pre-computes the
+                # tree path structure — recreating it on every request wastes ~5-20ms.
+                try:
+                    import shap as _shap
+                    shap_explainer = _shap.TreeExplainer(
+                        base_model, feature_perturbation="tree_path_dependent"
+                    )
+                    logger.info("SHAP TreeExplainer pre-built and cached.")
+                except Exception:
+                    logger.warning("Could not build SHAP explainer at startup — SHAP will be skipped.")
             else:
                 logger.warning("XGBoost base model not found at %s — SHAP explanations disabled.", base_path)
 
@@ -100,6 +112,7 @@ def load_model(model_type: str = "xgboost") -> None:
             model_type=model_type,
             artifact_path=str(artifact_path),
             base_model=base_model,
+            shap_explainer=shap_explainer,
         )
         logger.info(
             "ML model loaded: %s | %d features | artifact: %s",
