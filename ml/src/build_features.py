@@ -40,51 +40,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import text
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.db_utils import get_engine
+from src.db_utils import get_engine, load_price_history
 
 logger = logging.getLogger(__name__)
 
 MIN_OBSERVATIONS = 2   # Products with fewer rows are skipped
-
-
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
-
-def load_price_history(engine) -> pd.DataFrame:
-    query = text("""
-        SELECT
-            ph.id,
-            ph.product_id,
-            ph.price::float          AS price,
-            ph.currency,
-            ph.availability,
-            ph.observed_at,
-            ph.source,
-            p.title,
-            p.brand,
-            p.category,
-            r.name                   AS retailer
-        FROM price_history ph
-        JOIN products  p ON ph.product_id  = p.id
-        JOIN retailers r ON p.retailer_id  = r.id
-        ORDER BY ph.product_id, ph.observed_at
-    """)
-    with engine.connect() as conn:
-        df = pd.read_sql(query, conn)
-
-    df["observed_at"] = pd.to_datetime(df["observed_at"], utc=True)
-
-    logger.info(
-        "Loaded %d observations across %d products from %d retailer(s).",
-        len(df),
-        df["product_id"].nunique(),
-        df["retailer"].nunique(),
-    )
-    return df
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +182,10 @@ def main():
 
     engine = get_engine()
     df_raw = load_price_history(engine)
+    logger.info(
+        "Loaded %d observations across %d products from %d retailer(s).",
+        len(df_raw), df_raw["product_id"].nunique(), df_raw["retailer"].nunique(),
+    )
 
     if df_raw.empty:
         logger.error("No price data. Run:  cd backend && python -m app.db.seed")

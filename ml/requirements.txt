@@ -12,6 +12,8 @@ python-dotenv>=1.0.0
 
 # ML
 scikit-learn>=1.4.0
+xgboost>=2.0.0
+shap>=0.44.0
 
 # Visualization
 matplotlib>=3.7.0

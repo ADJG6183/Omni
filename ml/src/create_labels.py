@@ -34,31 +34,14 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import text
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.db_utils import get_engine
+from src.db_utils import get_engine, load_price_history
 
 logger = logging.getLogger(__name__)
 
 DROP_THRESHOLD   = 0.05   # 5% price drop within 7 days = positive label
 LABEL_WINDOW_DAYS = 7
-
-
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
-
-def load_price_history(engine) -> pd.DataFrame:
-    query = text("""
-        SELECT ph.id, ph.product_id, ph.price::float AS price, ph.observed_at
-        FROM price_history ph
-        ORDER BY ph.product_id, ph.observed_at
-    """)
-    with engine.connect() as conn:
-        df = pd.read_sql(query, conn)
-    df["observed_at"] = pd.to_datetime(df["observed_at"], utc=True)
-    return df
 
 
 # ---------------------------------------------------------------------------
